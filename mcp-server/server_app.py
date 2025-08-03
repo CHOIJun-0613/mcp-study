@@ -11,9 +11,13 @@ import json
 import httpx
 from dotenv import load_dotenv
 import groq
+from logger_config import setup_logger
 
 # .env 파일 로드
 load_dotenv()
+
+# 로거 설정
+logger = setup_logger("weather-server")
 
 # LLM Provider 설정
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
@@ -37,6 +41,8 @@ if LLM_PROVIDER == "groq" and GROQ_API_KEY != "your_groq_api_key_here":
 # Set encoding for proper character handling
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
+
+logger.info("Weather API Server 시작 중...")
 
 # Initialize FastAPI server
 app = FastAPI(
@@ -78,29 +84,30 @@ class WeatherResponse(BaseModel):
 
 async def make_nws_request(url: str) -> dict[str, Any] | None:
     """Make a request to the National Weather Service API"""
-    print(f"[DEBUG] NWS API 호출: {url}")
+    logger.debug(f"NWS API 호출: {url}")
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url, headers={"User-Agent": "WeatherApp/1.0"})
-            print(f"[DEBUG] NWS API 응답 상태: {response.status_code}")
+            logger.debug(f"NWS API 응답 상태: {response.status_code}")
             response.raise_for_status()
             result = response.json()
-            print(f"[DEBUG] NWS API 응답 성공")
+            logger.debug("NWS API 응답 성공")
             return result
     except Exception as e:
-        print(f"[DEBUG] NWS API 오류: {e}")
+        logger.error(f"NWS API 오류: {e}")
         return None
 
 async def call_groq(messages: list, is_translation: bool = False) -> dict:
     """Call GROQ API using groq.Groq() client"""
-    print(f"[DEBUG] GROQ API 호출 시작 - 모델: {GROQ_MODEL}")
-    print(f"[DEBUG] 메시지 개수: {len(messages)}")
-    print(f"[DEBUG] 번역 요청 여부: {is_translation}")
+    logger.debug(f"GROQ API 호출 시작 - 모델: {GROQ_MODEL}")
+    logger.debug(f"메시지 개수: {len(messages)}")
+    logger.debug(f"번역 요청 여부: {is_translation}")
     
     if groq_client is None:
+        logger.error("GROQ 클라이언트가 초기화되지 않았습니다. GROQ_API_KEY를 확인해주세요.")
         raise Exception("GROQ 클라이언트가 초기화되지 않았습니다. GROQ_API_KEY를 확인해주세요.")
     
-    print(f"[DEBUG] GROQ 메시지: {json.dumps(messages, ensure_ascii=False, indent=2)}")
+    logger.debug(f"GROQ 메시지: {json.dumps(messages, ensure_ascii=False, indent=2)}")
     
     try:
         # 번역 요청인 경우 더 많은 토큰 허용
@@ -116,33 +123,34 @@ async def call_groq(messages: list, is_translation: bool = False) -> dict:
             stop=["\n\n"] if not is_translation else None  # 번역 시에는 stop 토큰 제거
         )
         
-        print(f"[DEBUG] GROQ API 응답 성공 (max_tokens: {max_tokens})")
-        print(f"[DEBUG] GROQ API 응답: {response}")
+        logger.debug(f"GROQ API 응답 성공 (max_tokens: {max_tokens})")
+        logger.debug(f"GROQ API 응답: {response}")
         
         # 응답에서 content 추출
         if response.choices and len(response.choices) > 0:
             content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason
-            print(f"[DEBUG] GROQ API 응답 내용: {content}")
-            print(f"[DEBUG] GROQ API finish_reason: {finish_reason}")
+            logger.debug(f"GROQ API 응답 내용: {content}")
+            logger.debug(f"GROQ API finish_reason: {finish_reason}")
             
             if finish_reason == 'length':
-                print(f"[DEBUG] 경고: 응답이 토큰 제한으로 잘렸습니다.")
+                logger.warning("경고: 응답이 토큰 제한으로 잘렸습니다.")
             
             return {
                 "response": content.strip() if content else ""
             }
         else:
+            logger.error("GROQ API 응답에 content가 없습니다.")
             raise Exception("GROQ API 응답에 content가 없습니다.")
             
     except Exception as e:
-        print(f"[DEBUG] GROQ API 오류: {str(e)}")
+        logger.error(f"GROQ API 오류: {str(e)}")
         raise Exception(f"GROQ API error: {str(e)}")
 
 async def call_ollama(messages: list) -> dict:
     """Call Ollama API"""
-    print(f"[DEBUG] Ollama API 호출 시작 - 모델: {OLLAMA_MODEL}")
-    print(f"[DEBUG] 메시지 개수: {len(messages)}")
+    logger.debug(f"Ollama API 호출 시작 - 모델: {OLLAMA_MODEL}")
+    logger.debug(f"메시지 개수: {len(messages)}")
     
     # 메시지를 프롬프트로 변환
     prompt = ""
@@ -158,8 +166,8 @@ async def call_ollama(messages: list) -> dict:
     if len(prompt) > 4000:
         prompt = prompt[:4000] + "\n\n[Content truncated due to length]"
     
-    print(f"[DEBUG] Ollama 프롬프트 길이: {len(prompt)}")
-    print(f"[DEBUG] Ollama 프롬프트: {prompt[:200]}...")
+    logger.debug(f"Ollama 프롬프트 길이: {len(prompt)}")
+    logger.debug(f"Ollama 프롬프트: {prompt[:200]}...")
     
     payload = {
         "model": OLLAMA_MODEL,
@@ -171,8 +179,8 @@ async def call_ollama(messages: list) -> dict:
         }
     }
     
-    print(f"[DEBUG] Ollama API URL: {OLLAMA_URL}/api/generate")
-    print(f"[DEBUG] Ollama API Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+    logger.debug(f"Ollama API URL: {OLLAMA_URL}/api/generate")
+    logger.debug(f"Ollama API Payload: {json.dumps(payload, ensure_ascii=False, indent=2)}")
     
     async with httpx.AsyncClient(timeout=120.0) as client:
         try:
@@ -184,28 +192,29 @@ async def call_ollama(messages: list) -> dict:
                 json=payload,
                 headers=headers
             )
-            print(f"[DEBUG] Ollama API 응답 상태: {response.status_code}")
+            logger.debug(f"Ollama API 응답 상태: {response.status_code}")
             
             response.raise_for_status()
             result = response.json()
-            print(f"[DEBUG] Ollama API 응답: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            #logger.debug(f"Ollama API 응답: {json.dumps(result, ensure_ascii=False, indent=2)}")
             
             if "response" in result:
-                print(f"[DEBUG] Ollama API 응답 내용: {result['response'][:200]}...")
+                logger.debug(f"Ollama API 응답 내용: {result['response'][:200]}...")
             
             return result
         except Exception as e:
-            print(f"[DEBUG] Ollama API 오류: {str(e)}")
+            logger.error(f"Ollama API 오류: {str(e)}")
             raise Exception(f"Ollama API error: {str(e)}")
 
 async def call_llm(messages: list, is_translation: bool = False) -> dict:
     """Call the configured LLM provider"""
-    print(f"[DEBUG] LLM 호출 시작 - Provider: {LLM_PROVIDER}, 번역: {is_translation}")
+    logger.debug(f"LLM 호출 시작 - Provider: {LLM_PROVIDER}, 번역: {is_translation}")
     if LLM_PROVIDER == "groq":
         return await call_groq(messages, is_translation)
     elif LLM_PROVIDER == "ollama":
         return await call_ollama(messages)
     else:
+        logger.error(f"지원하지 않는 LLM Provider: {LLM_PROVIDER}")
         raise Exception(f"지원하지 않는 LLM Provider: {LLM_PROVIDER}")
 
 def format_alert(feature: dict) -> str:
@@ -238,8 +247,8 @@ async def health_check():
 @app.post("/api/query")
 async def process_query(request: QueryRequest):
     """Process a query using configured LLM and weather tools"""
-    print(f"[DEBUG] 쿼리 처리 시작: {request.query}")
-    print(f"[DEBUG] LLM Provider: {LLM_PROVIDER}")
+    logger.info(f"쿼리 처리 시작: {request.query}")
+    logger.debug(f"LLM Provider: {LLM_PROVIDER}")
     
     async def generate_response() -> AsyncGenerator[str, None]:
         try:
@@ -250,12 +259,12 @@ async def process_query(request: QueryRequest):
             weather_keywords = ["weather", "forecast", "temperature", "날씨", "예보", "기온"]
             query_lower = request.query.lower()
             
-            print(f"[DEBUG] 날씨 키워드 검사: {weather_keywords}")
-            print(f"[DEBUG] 쿼리 (소문자): {query_lower}")
+            logger.debug(f"날씨 키워드 검사: {weather_keywords}")
+            logger.debug(f"쿼리 (소문자): {query_lower}")
             
             weather_data = None
             if any(keyword in query_lower for keyword in weather_keywords):
-                print(f"[DEBUG] 날씨 관련 쿼리 감지됨")
+                logger.debug("날씨 관련 쿼리 감지됨")
                 yield f"data: {json.dumps({'type': 'status', 'message': '날씨 정보를 가져오고 있습니다...'})}\n\n"
                 
                 # 위치에 따른 도구 선택
@@ -279,23 +288,23 @@ async def process_query(request: QueryRequest):
                     tool_name = "get_forecast"
                     tool_args = {"latitude": 34.0522, "longitude": -118.2437}
                 
-                print(f"[DEBUG] 선택된 도구: {tool_name}")
-                print(f"[DEBUG] 도구 인수: {tool_args}")
+                logger.debug(f"선택된 도구: {tool_name}")
+                logger.debug(f"도구 인수: {tool_args}")
                 
                 # 3. 날씨 API 호출
                 if tool_name == "get_forecast":
-                    print(f"[DEBUG] 예보 API 호출 시작")
+                    logger.debug("예보 API 호출 시작")
                     points_url = f"{NWS_API_BASE}/points/{tool_args['latitude']},{tool_args['longitude']}"
                     points_data = await make_nws_request(points_url)
                     
                     if points_data:
-                        print(f"[DEBUG] Points API 응답 성공")
+                        logger.debug("Points API 응답 성공")
                         forecast_url = points_data["properties"]["forecast"]
-                        print(f"[DEBUG] Forecast URL: {forecast_url}")
+                        logger.debug(f"Forecast URL: {forecast_url}")
                         forecast_data = await make_nws_request(forecast_url)
                         
                         if forecast_data:
-                            print(f"[DEBUG] Forecast API 응답 성공")
+                            logger.debug("Forecast API 응답 성공")
                             periods = forecast_data["properties"]["periods"]
                             forecasts = []
                             for period in periods[:5]:
@@ -308,16 +317,16 @@ Forecast: {period['detailedForecast']}
                                 forecasts.append(forecast)
                             
                             weather_data = "\n---\n".join(forecasts)
-                            print(f"[DEBUG] 날씨 데이터 생성 완료 (길이: {len(weather_data)})")
+                            logger.debug(f"날씨 데이터 생성 완료 (길이: {len(weather_data)})")
                         else:
                             weather_data = "날씨 데이터를 가져올 수 없습니다."
-                            print(f"[DEBUG] Forecast API 실패")
+                            logger.error("Forecast API 실패")
                     else:
                         weather_data = "날씨 데이터를 가져올 수 없습니다."
-                        print(f"[DEBUG] Points API 실패")
+                        logger.error("Points API 실패")
                         
                 elif tool_name == "get_alerts":
-                    print(f"[DEBUG] 경보 API 호출 시작")
+                    logger.debug("경보 API 호출 시작")
                     url = f"{NWS_API_BASE}/alerts/active/area/{tool_args['state']}"
                     data = await make_nws_request(url)
                     
@@ -325,13 +334,13 @@ Forecast: {period['detailedForecast']}
                         if data["features"]:
                             alerts = [format_alert(feature) for feature in data["features"]]
                             weather_data = "\n---\n".join(alerts)
-                            print(f"[DEBUG] 경보 데이터 생성 완료 (경보 수: {len(data['features'])})")
+                            logger.debug(f"경보 데이터 생성 완료 (경보 수: {len(data['features'])})")
                         else:
                             weather_data = "이 지역에 활성화된 경보가 없습니다."
-                            print(f"[DEBUG] 활성 경보 없음")
+                            logger.debug("활성 경보 없음")
                     else:
                         weather_data = "경보 데이터를 가져올 수 없습니다."
-                        print(f"[DEBUG] 경보 API 실패")
+                        logger.error("경보 API 실패")
             
             # 4. LLM을 한 번만 호출하여 날씨 정보와 번역을 함께 처리
             yield f"data: {json.dumps({'type': 'status', 'message': f'{LLM_PROVIDER.upper()} 모델을 호출하고 있습니다...'})}\n\n"
@@ -361,8 +370,8 @@ Forecast: {period['detailedForecast']}
                     }
                 ]
                 
-                print(f"[DEBUG] 날씨 정보와 번역을 함께 처리")
-                print(f"[DEBUG] 번역할 데이터 길이: {len(weather_data)}")
+                logger.debug("날씨 정보와 번역을 함께 처리")
+                logger.debug(f"번역할 데이터 길이: {len(weather_data)}")
                 
             else:
                 # 날씨 정보가 없는 경우: 일반 쿼리 처리
@@ -384,27 +393,27 @@ When asked about weather, I will automatically call the appropriate weather tool
                     }
                 ]
                 
-                print(f"[DEBUG] 일반 쿼리 처리")
+                logger.debug("일반 쿼리 처리")
 
-            print(f"[DEBUG] 시스템 메시지: {system_message}")
-            print(f"[DEBUG] 사용자 메시지: {request.query if not weather_data else '날씨 정보 번역 요청'}")
+            logger.debug(f"시스템 메시지: {system_message}")
+            logger.debug(f"사용자 메시지: {request.query if not weather_data else '날씨 정보 번역 요청'}")
 
             # LLM 호출 (번역이 필요한 경우 is_translation=True)
             response = await call_llm(messages, is_translation=bool(weather_data))
             
             if "response" not in response:
-                print(f"[DEBUG] LLM 응답에 'response' 키가 없음: {response}")
+                logger.error(f"LLM 응답에 'response' 키가 없음: {response}")
                 yield f"data: {json.dumps({'type': 'error', 'message': 'LLM 응답을 받을 수 없습니다.'})}\n\n"
                 return
 
             response_text = response["response"]
-            print(f"[DEBUG] LLM 응답: {response_text}")
+            logger.debug(f"LLM 응답: {response_text}")
             
             # 5. 최종 결과 반환
             yield f"data: {json.dumps({'type': 'result', 'content': response_text})}\n\n"
                 
         except Exception as e:
-            print(f"[DEBUG] 쿼리 처리 중 오류: {e}")
+            logger.error(f"쿼리 처리 중 오류: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': f'오류가 발생했습니다: {str(e)}'})}\n\n"
     
     return StreamingResponse(
@@ -424,12 +433,14 @@ async def get_forecast(request: ForecastRequest):
     Args:
         request: ForecastRequest with latitude and longitude
     """
+    logger.info(f"날씨 예보 요청: lat={request.latitude}, lon={request.longitude}")
     try:
         # First get the forecast grid endpoint
         points_url = f"{NWS_API_BASE}/points/{request.latitude},{request.longitude}"
         points_data = await make_nws_request(points_url)
 
         if not points_data:
+            logger.error(f"위치에 대한 예보 데이터를 가져올 수 없음: {request.latitude}, {request.longitude}")
             return WeatherResponse(
                 success=False,
                 data="",
@@ -441,6 +452,7 @@ async def get_forecast(request: ForecastRequest):
         forecast_data = await make_nws_request(forecast_url)
 
         if not forecast_data:
+            logger.error("상세 예보를 가져올 수 없음")
             return WeatherResponse(
                 success=False,
                 data="",
@@ -460,6 +472,7 @@ Forecast: {period['detailedForecast']}
             forecasts.append(forecast)
 
         result = "\n---\n".join(forecasts)
+        logger.info("날씨 예보 생성 완료")
         
         return WeatherResponse(
             success=True,
@@ -467,6 +480,7 @@ Forecast: {period['detailedForecast']}
         )
         
     except Exception as e:
+        logger.error(f"예보 요청 처리 중 오류: {str(e)}")
         return WeatherResponse(
             success=False,
             data="",
@@ -480,11 +494,13 @@ async def get_alerts(request: AlertsRequest):
     Args:
         request: AlertsRequest with state code
     """
+    logger.info(f"날씨 경보 요청: state={request.state}")
     try:
         url = f"{NWS_API_BASE}/alerts/active/area/{request.state}"
         data = await make_nws_request(url)
 
         if not data or "features" not in data:
+            logger.error(f"경보를 가져올 수 없거나 경보가 없음: {request.state}")
             return WeatherResponse(
                 success=False,
                 data="",
@@ -492,6 +508,7 @@ async def get_alerts(request: AlertsRequest):
             )
 
         if not data["features"]:
+            logger.info(f"활성 경보 없음: {request.state}")
             return WeatherResponse(
                 success=True,
                 data="No active alerts for this state."
@@ -499,6 +516,7 @@ async def get_alerts(request: AlertsRequest):
 
         alerts = [format_alert(feature) for feature in data["features"]]
         result = "\n---\n".join(alerts)
+        logger.info(f"경보 생성 완료: {len(data['features'])}개 경보")
         
         return WeatherResponse(
             success=True,
@@ -506,6 +524,7 @@ async def get_alerts(request: AlertsRequest):
         )
         
     except Exception as e:
+        logger.error(f"경보 요청 처리 중 오류: {str(e)}")
         return WeatherResponse(
             success=False,
             data="",

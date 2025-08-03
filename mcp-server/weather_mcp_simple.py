@@ -9,18 +9,21 @@ from typing import Any
 import httpx
 import json
 from mcp.server.fastmcp import FastMCP
+from logger_config import setup_logger
 
 # Set encoding for proper character handling
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-# 디버그 로그 추가
-print("MCP 서버 시작 중...", file=sys.stderr)
+# 로거 설정
+logger = setup_logger("weather-mcp-simple")
+
+logger.info("MCP 서버 시작 중...")
 
 # Initialize FastMCP server
 mcp = FastMCP("weather-mcp")
 
-print("FastMCP 서버 초기화 완료", file=sys.stderr)
+logger.info("FastMCP 서버 초기화 완료")
 
 # Constants
 NWS_API_BASE = "https://api.weather.gov"
@@ -157,7 +160,7 @@ async def process_weather_query(query: str) -> str:
     Args:
         query: Natural language weather query (Korean or English)
     """
-    print(f"process_weather_query 호출됨: {query}", file=sys.stderr)
+    logger.info(f"process_weather_query 호출됨: {query}")
     
     try:
         # 시스템 메시지 생성
@@ -179,14 +182,15 @@ When asked about weather, I will automatically call the appropriate weather tool
             }
         ]
 
-        print("Ollama 호출 시작...", file=sys.stderr)
+        logger.debug("Ollama 호출 시작...")
         
         # 초기 Ollama 호출
         response = await call_ollama(messages)
         
-        print("Ollama 응답 받음", file=sys.stderr)
+        logger.debug("Ollama 응답 받음")
         
         if "response" not in response:
+            logger.error("AI 모델 응답을 받을 수 없습니다.")
             return "AI 모델 응답을 받을 수 없습니다."
 
         response_text = response["response"]
@@ -196,7 +200,7 @@ When asked about weather, I will automatically call the appropriate weather tool
         query_lower = query.lower()
         
         if any(keyword in query_lower for keyword in weather_keywords):
-            print("날씨 관련 질의 감지됨", file=sys.stderr)
+            logger.debug("날씨 관련 질의 감지됨")
             
             # 위치에 따른 도구 선택
             tool_name = None
@@ -303,6 +307,6 @@ Forecast: {period['detailedForecast']}
 
 if __name__ == "__main__":
     # Initialize and run the server
-    print("MCP 서버 실행 시작...", file=sys.stderr)
+    logger.info("MCP 서버 실행 시작...")
     mcp.run(transport='stdio')
-    print("MCP 서버 종료", file=sys.stderr) 
+    logger.info("MCP 서버 종료") 
